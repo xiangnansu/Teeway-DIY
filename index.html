@@ -1,0 +1,428 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8" />
+	<title>T-shirt Editor - Export Hide Mask</title>
+	<script src="fabric.min.js"></script>
+	<style>
+		html, body {
+			margin: 0;
+			height: 100%;
+			overflow: hidden;
+		}
+
+		body {
+			display: flex;
+			justify-content: center;
+			align-items: center;
+			background: #eee;
+			position: relative;
+		}
+
+		canvas {
+			border: 1px solid #ccc;
+			display: block;
+		}
+
+		.panel {
+			position: absolute;
+			background: rgba(240,240,240,0.9);
+			border: 1px solid #aaa;
+			border-radius: 8px;
+			box-shadow: 0 0 10px rgba(0,0,0,0.2);
+			cursor: move;
+			padding: 10px;
+			font-family: sans-serif;
+		}
+
+		#bg-panel {
+			top: 20px;
+			left: 20px;
+			z-index: 300;
+			display: flex;
+			flex-wrap: wrap;
+			gap: 5px;
+		}
+
+		#add-panel {
+			top: 120px;
+			left: 20px;
+			z-index: 300;
+		}
+
+		#save-panel {
+			top: 220px;
+			left: 20px;
+			z-index: 300;
+		}
+
+		#layer-panel {
+			top: 320px;
+			left: 20px;
+			width: 280px;
+			max-height: 60vh;
+			overflow-y: auto;
+			z-index: 200;
+		}
+
+		button {
+			padding: 5px 10px;
+			font-size: 16px;
+			background: #fff;
+			border: 1px solid #aaa;
+			border-radius: 6px;
+			cursor: pointer;
+		}
+
+			button:hover {
+				background: #ddd;
+			}
+
+		.layer-item {
+			display: flex;
+			justify-content: space-between;
+			align-items: center;
+			padding: 5px 10px;
+			margin-bottom: 6px;
+			background: #fff;
+			border: 1px solid #aaa;
+			border-radius: 6px;
+		}
+
+			.layer-item.active {
+				background: #cce5ff;
+			}
+
+		.layer-controls {
+			display: flex;
+			gap: 4px;
+		}
+	</style>
+</head>
+<body>
+	<div id="bg-panel" class="panel">
+		<button onclick="changeBackground('white')">白</button>
+		<button onclick="changeBackground('red')">紅</button>
+		<button onclick="changeBackground('blue')">藍</button>
+		<button onclick="changeBackground('green')">綠</button>
+		<button onclick="changeBackground('yellow')">黃</button>
+		<button onclick="changeBackground('gray-texture')">灰紋理</button>
+	</div>
+	<div id="add-panel" class="panel">
+		<button id="addImageBtn">新增圖片</button>
+		<button id="addTextBtn">新增文字</button>
+	</div>
+	<div id="save-panel" class="panel">
+		<button id="saveBtn">儲存客製化</button>
+	</div>
+	<div id="layer-panel" class="panel" style="display:none"><div id="layer-list"></div></div>
+	<canvas id="canvas"></canvas>
+
+	<script>
+		const canvas=new fabric.Canvas('canvas');
+		canvas.preserveObjectStacking=true;
+		canvas.selection=false;
+		let layerCounter=1,clipMaskRect=null;
+		let currentBg='white',templateImgObj=null;
+		const backgrounds={
+			white: 'white.png',red: 'red.png',blue: 'blue.png',
+			green: 'green.png',yellow: 'yellow.png','gray-texture': 'gray-texture.png'
+		};
+		const templateImage='template.png';
+
+		function resizeCanvas()
+		{
+			const maxW=window.innerWidth*0.9;
+			const maxH=window.innerHeight*0.9;
+			const aspect=600/700;
+			let newW=maxW,newH=newW/aspect;
+			if(newH>maxH) {newH=maxH; newW=newH*aspect;}
+			canvas.setWidth(newW);
+			canvas.setHeight(newH);
+			canvas.getElement().style.width=newW+'px';
+			canvas.getElement().style.height=newH+'px';
+			canvas.setBackgroundColor('white',canvas.requestRenderAll.bind(canvas));
+			loadBackgroundAndTemplate();
+		}
+
+		function changeBackground(name)
+		{
+			currentBg=name;
+			loadBackgroundAndTemplate();
+		}
+
+		function loadBackgroundAndTemplate()
+		{
+			canvas.setBackgroundImage(null,canvas.requestRenderAll.bind(canvas));
+			if(templateImgObj) canvas.remove(templateImgObj);
+			fabric.Image.fromURL(backgrounds[currentBg],bgImg =>
+			{
+				fitImageToCanvas(bgImg,0.95);
+				canvas.setBackgroundImage(bgImg,canvas.requestRenderAll.bind(canvas));
+			});
+			fabric.Image.fromURL(templateImage,tempImg =>
+			{
+				fitImageToCanvas(tempImg,1.0);
+				tempImg.selectable=false;
+				tempImg.evented=false;
+				templateImgObj=tempImg;
+				canvas.add(tempImg);
+				canvas.sendToBack(tempImg);
+				canvas.requestRenderAll();
+			});
+		}
+
+		function fitImageToCanvas(img,scale)
+		{
+			const w=canvas.getWidth(),h=canvas.getHeight();
+			const ratio=img.width/img.height;
+			let drawW=w*scale,drawH=drawW/ratio;
+			if(drawH>h*scale) {drawH=h*scale; drawW=drawH*ratio;}
+			img.scaleToWidth(drawW);
+			img.scaleToHeight(drawH);
+			img.set({left: w/2,top: h/2,originX: 'center',originY: 'center'});
+		}
+
+		function createClipArea()
+		{
+			return new fabric.Rect({
+				left: clipMaskRect.left,
+				top: clipMaskRect.top,
+				width: clipMaskRect.width,
+				height: clipMaskRect.height,
+				absolutePositioned: true
+			});
+		}
+
+		function addControlSet(obj)
+		{
+			obj.controls={
+				tl: deleteControl(),
+				tr: rotateControl(),
+				br: scaleControl(0.5,0.5),
+				bl: scaleControl(-0.5,0.5)
+			};
+		}
+
+		function createMaskRect()
+		{
+			const w=canvas.getWidth()*0.44;
+			const h=canvas.getHeight()*0.5;
+			clipMaskRect=new fabric.Rect({
+				left: canvas.getWidth()/2-w/2,
+				top: canvas.getHeight()/2-h/2,
+				width: w,
+				height: h,
+				fill: '',
+				stroke: '#666',
+				strokeDashArray: [10,6],
+				strokeWidth: 2,
+				selectable: false,
+				evented: false,
+				excludeFromExport: true
+			});
+			canvas.add(clipMaskRect);
+			canvas.sendToBack(clipMaskRect);
+		}
+
+		document.getElementById('addImageBtn').onclick=() =>
+		{
+			if(!clipMaskRect) createMaskRect();
+			const clipArea=createClipArea();
+			fabric.Image.fromURL('66c7c4e6a2d0b4c5e74d700b56a238ba.png',img =>
+			{
+				img.scale(0.175);
+				Object.assign(img,{
+					left: canvas.getWidth()/2,
+					top: canvas.getHeight()/2,
+					originX: 'center',originY: 'center',
+					layerName: '圖層'+layerCounter++,
+					borderColor: '#06c',borderScaleFactor: 2,
+					transparentCorners: false,lockUniScaling: true,
+					padding: 10,clipPath: clipArea
+				});
+				addControlSet(img);
+				canvas.add(img);
+				canvas.setActiveObject(img);
+				canvas.requestRenderAll();
+				updateLayerPanel();
+			});
+		};
+
+		document.getElementById('addTextBtn').onclick=() =>
+		{
+			if(!clipMaskRect) createMaskRect();
+			const clipArea=createClipArea();
+			const textbox=new fabric.Textbox('輸入文字',{
+				left: canvas.getWidth()/2,
+				top: canvas.getHeight()/2,
+				textAlign: 'center',
+				fontSize: 24,
+				originX: 'center',originY: 'center',
+				layerName: '圖層'+layerCounter++,
+				borderColor: '#06c',borderScaleFactor: 2,
+				transparentCorners: false,lockUniScaling: true,
+				padding: 10,
+				clipPath: clipArea
+			});
+			textbox.on('changed',function()
+			{
+				textbox.set({width: null});
+				textbox.initDimensions();
+				canvas.requestRenderAll();
+			});
+			addControlSet(textbox);
+			canvas.add(textbox);
+			canvas.setActiveObject(textbox);
+			canvas.requestRenderAll();
+			updateLayerPanel();
+		};
+
+		document.getElementById('saveBtn').onclick=() =>
+		{
+			const wasVisible=clipMaskRect?.visible;
+			if(clipMaskRect) clipMaskRect.visible=false;
+			canvas.discardActiveObject();
+			canvas.requestRenderAll();
+			const dataURL=canvas.toDataURL({format: 'png'});
+			const link=document.createElement('a');
+			link.href=dataURL;
+			link.download='tshirt.png';
+			link.click();
+			if(clipMaskRect) clipMaskRect.visible=wasVisible;
+			canvas.requestRenderAll();
+		};
+
+		function deleteControl()
+		{
+			return new fabric.Control({
+				x: -0.5,y: -0.5,
+				render(ctx,left,top,_,obj)
+				{
+					ctx.save(); ctx.translate(left,top); ctx.rotate(fabric.util.degreesToRadians(obj.angle));
+					ctx.fillStyle='red'; ctx.fillRect(-10,-10,20,20);
+					ctx.fillStyle='white'; ctx.font='bold 14px sans-serif';
+					ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText('X',0,0);
+					ctx.restore();
+				},
+				mouseUpHandler(_,transform)
+				{
+					canvas.remove(transform.target);
+					canvas.discardActiveObject();
+					updateLayerPanel();
+					canvas.requestRenderAll();
+				},
+				cursorStyle: 'pointer',cornerSize: 24
+			});
+		}
+
+		function rotateControl()
+		{
+			return new fabric.Control({
+				x: 0.5,y: -0.5,
+				render(ctx,left,top,_,obj)
+				{
+					ctx.save(); ctx.translate(left,top); ctx.rotate(fabric.util.degreesToRadians(obj.angle));
+					ctx.fillStyle='#06c'; ctx.beginPath(); ctx.arc(0,0,11,0,Math.PI*2); ctx.fill();
+					ctx.fillStyle='white'; ctx.font='bold 14px sans-serif';
+					ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText('↻',-1,0);
+					ctx.restore();
+				},
+				actionHandler: fabric.controlsUtils.rotationWithSnapping,
+				cursorStyleHandler: fabric.controlsUtils.rotationStyleHandler,
+				cornerSize: 24
+			});
+		}
+
+		function scaleControl(x,y)
+		{
+			return new fabric.Control({
+				x,y,
+				render(ctx,left,top,_,obj)
+				{
+					ctx.save(); ctx.translate(left,top); ctx.rotate(fabric.util.degreesToRadians(obj.angle));
+					ctx.fillStyle='#06c'; ctx.beginPath(); ctx.arc(0,0,12,0,Math.PI*2); ctx.fill();
+					ctx.fillStyle='white'; ctx.font='bold 14px sans-serif';
+					ctx.textAlign='center'; ctx.textBaseline='middle';
+					ctx.scale(x<0? -1:1,1); ctx.fillText('⇲',0,0);
+					ctx.restore();
+				},
+				actionHandler: fabric.controlsUtils.scalingEqually,
+				cursorStyleHandler: fabric.controlsUtils.scaleCursorStyleHandler,
+				cornerSize: 24
+			});
+		}
+
+		function updateLayerPanel()
+		{
+			const panel=document.getElementById('layer-panel');
+			const list=document.getElementById('layer-list');
+			const objects=canvas.getObjects().filter(o => o!==clipMaskRect&&o!==templateImgObj);
+			const active=canvas.getActiveObject();
+			list.innerHTML='';
+			objects.slice().reverse().forEach(obj =>
+			{
+				const div=document.createElement('div');
+				div.className='layer-item'; div.textContent=obj.layerName||'圖層';
+				if(obj===active) div.classList.add('active');
+				div.onclick=() => {canvas.setActiveObject(obj); canvas.requestRenderAll(); updateActiveHighlight();};
+				const ctrl=document.createElement('div'); ctrl.className='layer-controls';
+				['🔼','🔽','❌'].forEach((txt,i) =>
+				{
+					const btn=document.createElement('button'); btn.textContent=txt;
+					btn.onclick=e =>
+					{
+						e.stopPropagation();
+						if(i===0) canvas.bringForward(obj);
+						else if(i===1) canvas.sendBackwards(obj);
+						else canvas.remove(obj);
+						updateLayerPanel(); canvas.requestRenderAll();
+					};
+					ctrl.appendChild(btn);
+				});
+				div.appendChild(ctrl); list.appendChild(div);
+			});
+			panel.style.display=objects.length? 'block':'none';
+		}
+
+		function updateActiveHighlight()
+		{
+			const target=canvas.getActiveObject();
+			const items=document.querySelectorAll('.layer-item');
+			items.forEach((item,i) =>
+			{
+				const obj=canvas.getObjects().filter(o => o!==clipMaskRect&&o!==templateImgObj).slice().reverse()[i];
+				item.classList.toggle('active',obj===target);
+			});
+		}
+
+		function makeDraggable(el)
+		{
+			let offsetX=0,offsetY=0,dragging=false;
+			el.addEventListener('mousedown',e =>
+			{
+				dragging=true;
+				offsetX=e.clientX-el.offsetLeft;
+				offsetY=e.clientY-el.offsetTop;
+			});
+			document.addEventListener('mousemove',e =>
+			{
+				if(dragging)
+				{
+					el.style.left=(e.clientX-offsetX)+'px';
+					el.style.top=(e.clientY-offsetY)+'px';
+				}
+			});
+			document.addEventListener('mouseup',() => dragging=false);
+		}
+
+		window.onload=() =>
+		{
+			resizeCanvas();
+			['bg-panel','add-panel','save-panel','layer-panel'].forEach(id =>
+				makeDraggable(document.getElementById(id)));
+		};
+		window.onresize=resizeCanvas;
+	</script>
+</body>
+</html>
