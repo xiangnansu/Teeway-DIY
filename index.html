@@ -328,7 +328,12 @@
 					ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText('↻',-1,0);
 					ctx.restore();
 				},
-				actionHandler: fabric.controlsUtils.rotationWithSnapping,
+				actionHandler(eventData,transform,x,y)
+				{
+					transform.originX='center';
+					transform.originY='center';
+					return fabric.controlsUtils.rotationWithSnapping(eventData,transform,x,y);
+				},
 				cursorStyleHandler: fabric.controlsUtils.rotationStyleHandler,
 				cornerSize: 24
 			});
@@ -347,7 +352,16 @@
 					ctx.scale(x<0? -1:1,1); ctx.fillText('⇲',0,0);
 					ctx.restore();
 				},
-				actionHandler: fabric.controlsUtils.scalingEqually,
+				actionHandler(eventData,transform,x,y)
+				{
+					transform.originX='center';
+					transform.originY='center';
+					const target=transform.target;
+					target.flipX=false;
+					target.flipY=false;
+					const result=fabric.controlsUtils.scalingEqually(eventData,transform,x,y);
+					return result;
+				},
 				cursorStyleHandler: fabric.controlsUtils.scaleCursorStyleHandler,
 				cornerSize: 24
 			});
@@ -423,6 +437,10 @@
 				makeDraggable(document.getElementById(id)));
 		};
 		window.onresize=resizeCanvas;
+
+		canvas.on('selection:created',updateActiveHighlight);
+		canvas.on('selection:updated',updateActiveHighlight);
+		canvas.on('selection:cleared',updateActiveHighlight);
 	</script>
 </body>
 </html>
