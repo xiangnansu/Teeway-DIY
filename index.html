@@ -284,10 +284,13 @@
 			if(clipMaskRect) clipMaskRect.visible=false;
 			canvas.discardActiveObject();
 			canvas.requestRenderAll();
-			const dataURL=canvas.toDataURL({format: 'png'});
+			const dataURL=canvas.toDataURL({
+				format: 'png',
+				multiplier: 2 
+			});
 			const link=document.createElement('a');
 			link.href=dataURL;
-			link.download='tshirt.png';
+			link.download='T-Shirt.png';
 			link.click();
 			if(clipMaskRect) clipMaskRect.visible=wasVisible;
 			canvas.requestRenderAll();
